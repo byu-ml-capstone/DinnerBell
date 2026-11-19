@@ -1,0 +1,35 @@
+# Secrets: commit .env.example only
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Django and Celery
+db.sqlite3
+celerybeat-schedule
+celerybeat.pid
+
+# Flutter and Dart (`flutter create` adds frontend/.gitignore for the rest)
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# OS and editors
+.DS_Store
+.idea/
+*.iml
+
+# Claude Code personal settings
+.claude/settings.local.json
