@@ -101,7 +101,7 @@ If the same plan is open on two devices and one changes it, the other device pro
 
 **Meals and variants.** A **Meal** is the parent record (for example, "Chicken tacos"). Each **Recipe** is a specific version of that meal with a foreign key to its parent. Users can edit a recipe or save a variant under the same meal, keeping both versions. Recipes can be tagged and archived.
 
-**Saving from a website.** A user submits a recipe URL. A background job extracts the title, ingredients with quantities and units, instructions, servings, source, and an optional image. The recipe waits in a **needs review** state until the user checks and corrects it. Website parsing sits behind a source adapter so other inputs can be added later.
+**Saving from a website.** A user submits a recipe URL. A background job extracts the title, ingredients with quantities and units, instructions, servings, source, and an optional image, and saves them as a **draft** recipe. Users can return to their drafts at any time to review and correct them. Confirming a draft makes it a regular recipe; deleting a draft removes it. Until the user does one or the other, the recipe stays a draft, and a draft can't be used in a plan. Website parsing sits behind a source adapter so other inputs can be added later.
 
 **When extraction fails.** The user sees a plain-language message (for example, "We couldn't read this page") with the option to enter the recipe manually. No stack traces or internal errors are shown.
 
@@ -184,7 +184,7 @@ Known hard cases for hand-labeling, the future labeler, and test fixtures: ingre
 5. The system shall store dietary restrictions and recipe dietary labels in a strict, queryable field with a fixed vocabulary and a recorded label source.
 6. The system shall let users create, view, edit, tag, and archive recipes, and save variants under a parent meal.
 7. The system shall accept a recipe URL, create a background extraction job, and show its status.
-8. The system shall let users review and correct extracted fields before a recipe is saved or used in a plan.
+8. The system shall save imported recipes as drafts that users can return to, review, correct, and then confirm or delete, and shall not use a draft in a plan until it is confirmed.
 9. The system shall generate a weekly plan for the selected meal slots that ranks recipes fitting all household restrictions above those that conflict.
 10. The system shall alert the user to every planned recipe that conflicts with a household restriction, naming the conflict, and let the user keep or remove it.
 11. The system shall let users accept, reject, replace, or edit planned meals and retain the approved version and edit history.
@@ -238,7 +238,7 @@ Versioned routes under `/api/v1/`, with Django Ninja schemas, validation, and ge
 
 - `/users/me`, `/household`, `/household/restrictions`, `/dietary-tags`
 - `/meals`, `/recipes`, `/recipes/{id}`, `/recipes/{id}/variants`, `/recipes/{id}/dietary-labels`
-- `/recipe-imports` (submit a URL, check status, confirm reviewed content)
+- `/recipe-imports` (submit a URL, check status, list drafts, confirm or delete a draft)
 - `/meal-plans`, `/meal-plans/{id}` (generate, retrieve, edit, approve; includes restriction alerts and the plan version for the refresh check)
 - `/shopping-lists`, `/shopping-lists/{id}`
 - `/prices` (estimates by ZIP code through the price provider)
@@ -252,9 +252,9 @@ Quick reads and writes are synchronous. Recipe extraction, price lookups, and pl
 ## 9. Background jobs and notifications
 
 1. The user submits a request (for example, a recipe URL). The server creates a job record with an ID and responds right away.
-2. A Celery worker runs the job. Status moves through queued, running, needs review, or failed.
-3. The user can leave the app. When the job finishes or fails, the server sends a browser notification where the browser supports it.
-4. When the user opens the app, it shows current status from the job record. This is the dependable path in the web pilot, since some browsers (including Safari on iPhones, unless the site is added to the home screen) won't show notifications.
+2. A Celery worker runs the job. Status moves from **queued** to **running**, then ends in **completed** or **failed**. Every job type (recipe import, price lookup, plan generation) uses the same statuses. For a recipe import, completed means the extracted recipe was saved as a draft (§4.2). Reviewing the draft happens on the recipe, so the job doesn't wait for it.
+3. The user can leave the app. When the job completes or fails, the server sends a browser notification where the browser supports it.
+4. When the user opens the app, it shows current status from the job record. A completed recipe import links to its draft. This is the dependable path in the web pilot, since some browsers (including Safari on iPhones, unless the site is added to the home screen) won't show notifications.
 
 Native push notifications come with the mobile apps. The notification service is behind an interface so the web and mobile versions can use different implementations; which service to use is still open (§16). Jobs are idempotent where practical, retry a bounded number of times for temporary failures, and never create duplicate recipes on retry.
 
@@ -306,6 +306,7 @@ Keep research datasets clearly separated from real user data.
 - NDCG@10 = DCG@10 / IDCG@10.
 - **Primary metric:** gain(rel) = 2^rel − 1, which weights getting the top-rated recipes first most heavily (a 5 counts 31, a 4 counts 15).
 - **Robustness check:** the same calculation with gain(rel) = rel (the raw rating). Results should hold under both.
+- **Users with all-zero ratings:** if every one of a user's held-out ratings is 0, IDCG@10 is 0 under both gain functions, so NDCG@10 is undefined. Leave that user out of every ranker's results (baseline, model, and random order) and out of the bootstrap, for both the primary metric and the robustness check, and report how many users were left out. Don't score them as 0 or 1: when every rating is 0, every order is equally good, so the user gives no evidence about which ranker is better. Some libraries, including scikit-learn's `ndcg_score`, score these users as 0 by default.
 
 **Target.** The Dinner Bell model reduces the Food.com baseline's ranking error, 1 − NDCG@10, by at least 30%. For example, if the baseline scores 0.70, the model must reach at least 0.79. Defining the target as a share of the remaining gap keeps it reachable wherever the baseline lands.
 
@@ -444,6 +445,9 @@ These are out of the pilot, but they shape decisions now. The right-hand column 
 | Q7 | Feature requests and issue reports in the first version. | §4.6 |
 | Q8 | Coding agents produce flowcharts and decision-log entries for business logic. | §13.3 |
 | Q9 | Notifications for background job status (browser notifications in the web pilot, native push in the mobile apps). | §9 |
+| Q10 | Every background job ends in completed or failed; needs review is not a job status. | §9 |
+| Q11 | Imported recipes are saved as drafts that users can return to, confirm, or delete; a draft can't be used in a plan. | §4.2, §6, §8 |
+| Q12 | Users whose held-out ratings are all 0 are left out of the NDCG@10 comparison, and the number left out is reported. | §11.2 |
 | Later | Aggregation before pantry subtraction, skip reasons, date ranges, non-food section, photo and social input, AI chat, calendar export, toddler guidance, calorie targets and ages. | §15 |
 
 ## 18. Sources

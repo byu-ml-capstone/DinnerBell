@@ -195,9 +195,9 @@ Every tool and external service fits the layer model through one owning layer an
 | Tool / service | Purpose | Owning layer | Contract and rules | Status |
 |----------------|---------|--------------|--------------------|--------|
 | PostgreSQL via Django ORM | Application state | Repositories | Constraints protect integrity. Schema changes only through migrations. | Decided |
-| Celery + Redis | Slow work: recipe extraction, price lookups, plan generation (§8) | Tasks call use cases | Pass IDs, not model objects. Idempotent where practical, a bounded number of retries for temporary failures, and a retry never creates a duplicate recipe (§9). Status moves through queued, running, needs review, failed. | Decided |
+| Celery + Redis | Slow work: recipe extraction, price lookups, plan generation (§8) | Tasks call use cases | Pass IDs, not model objects. Idempotent where practical, a bounded number of retries for temporary failures, and a retry never creates a duplicate recipe (§9). Job status moves from queued to running, then ends in completed or failed (§9). A completed recipe import has saved a draft recipe; review happens on the recipe, not the job. | Decided |
 | Flower | Operator monitoring | Operations only | Restricted to authorized operators; never exposed to app users (§12). | Decided |
-| Recipe source adapter | URL import; later photo, screenshot, and social inputs | `recipes` provider | Returns an editable draft that always waits in **needs review**. Prefer structured page data and fall back to the AI provider. Never execute page content. See [URL imports](#recipe-import). | Decided |
+| Recipe source adapter | URL import; later photo, screenshot, and social inputs | `recipes` provider | Returns an editable draft recipe, which stays a **draft** until the user confirms or deletes it. Prefer structured page data and fall back to the AI provider. Never execute page content. See [URL imports](#recipe-import). | Decided |
 | Price provider | Price estimates by ZIP code | `pricing` provider | Store API adapters and a fixture adapter share one interface. Accepts an optional store filter. Every price is stored with source, store or location, currency, and observed time. | Fixture fallback decided [D8a]; APIs TODO (§16 Q4) |
 | Product matching provider | Ingredient to store product | `pricing` provider | Unmatched items are flagged, never guessed silently. | TODO (§16 Q8) |
 | Recommendation provider | Recipe ranking | `planning` provider | Food.com baseline first, then the learned taste model behind the same interface (§11.2). Ranking never overrides restriction ordering or alerts. | Decided |
@@ -249,7 +249,7 @@ Source: §4.2, §12.
 
 - **Proposed URL safeguards:** accept only `http` and `https`; reject hosts that resolve to private, loopback, or link-local addresses, including after redirects; set connection timeouts and a maximum response size. These implement the spec's requirement to validate and constrain imported URLs.
 - Treat fetched pages as data. Never execute their scripts.
-- Imported recipes stay in **needs review** until the user confirms them, and can't be used in a plan before then.
+- Imported recipes are saved as **drafts**. A draft stays in the user's draft list until the user confirms or deletes it, and can't be used in a plan until it's confirmed. Deleting a draft removes it.
 - When extraction fails, show a plain-language message ("We couldn't read this page") with a manual entry option. Never show internal errors.
 
 ### Placeholder screens
@@ -307,7 +307,7 @@ Each layer has a clear responsibility and communicates through explicit interfac
 **Don't**
 - Implement workflow rules in route/view modules.
 - Split one rule across a handler and a service.
-- Encode lifecycle policy (e.g. "a recipe in needs review can't be used in a plan") in persistence code.
+- Encode lifecycle policy (e.g. "a draft recipe can't be used in a plan") in persistence code.
 
 **Agent check:** Before finishing a change, confirm no new business logic was added to a handler or DAO.
 
@@ -489,7 +489,7 @@ def process(data):
 
 # Clearer: same steps, intent and effects are visible
 def confirm_imported_recipe(recipe_id, reviewed_fields):
-    ensure_recipe_is_awaiting_review(recipe_id)
+    ensure_recipe_is_draft(recipe_id)
     apply_reviewed_fields(recipe_id, reviewed_fields)
     mark_recipe_ready_for_planning(recipe_id)
 ```
